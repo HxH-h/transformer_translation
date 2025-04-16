@@ -11,19 +11,18 @@ def read_json(path):
 
 data = read_json(path)
 
-
+# TODO 使用正则分词 避免无效合并分词
 # 创建分词器
 class Tokenizer:
     def __init__(self):
+        self.merge_items = {}
         self.vocabulary = {i : chr(i) for i in range(128)}
 
     # 获取相邻字符对 和 出现次数
-    def __get_pairs(self, code_list: list) -> dict:
-        pairs = {}
+    def __get_pairs(self, code_list: list , pairs: dict):
         for pair in zip(code_list, code_list[1:]):
             pairs[pair] = pairs.get(pair, 0) + 1
 
-        return pairs
 
     # 合并字符对
     def __merge(self , code_list , pair , index) -> list:
@@ -46,7 +45,7 @@ class Tokenizer:
     #BPE构建词汇表
     def build_vocabulary(self, vocab_size , sentences : list):
         # 获取句子初始的字符编码列表
-        raw_code = [ord(char) for sentence in sentences for char in sentence]
+        raw_code = [list(sentence.encode('utf-8')) for sentence in sentences]
 
         index = len(self.vocabulary)
         merge_num = vocab_size - index
@@ -54,31 +53,61 @@ class Tokenizer:
         # BPE
         for i in range(merge_num):
             # 统计相邻字符对 出现的次数
-            pairs = self.__get_pairs(raw_code)
+            pairs = {}
+            for code_list in raw_code:
+                self.__get_pairs(code_list, pairs)
+
             # 取最大
             max_pair = max(pairs, key=lambda x: pairs[x])
+            # 记录合并项 更新词汇表
+            self.merge_items[max_pair] = index + i
             self.vocabulary[index + i] = self.vocabulary[max_pair[0]] + self.vocabulary[max_pair[1]]
             # 合并
-            raw_code = self.__merge(raw_code, max_pair, index + i)
+            new_sentences = []
+            for code_list in raw_code:
+                new_sentences.append(self.__merge(code_list, max_pair, index + i))
+
+            raw_code = new_sentences
+        print(self.merge_items)
+
 
     # 保存词汇表
     def save_vocabulary(self, path = 'data.json'):
+        dict = {"vocabulary": self.vocabulary,
+                "merge":  {str(k): v for k, v in self.merge_items.items()}}
         # 将字典保存为JSON文件
         with open(path, 'w', encoding='utf-8') as json_file:
-            json.dump(self.vocabulary, json_file, ensure_ascii=False, indent=4)
+            json.dump(dict, json_file, ensure_ascii=False, indent=4)
 
     # 加载词汇表
     def load_vocabulary(self, path = 'data.json'):
         # 从JSON文件加载字典
         with open(path, 'r', encoding='utf-8') as json_file:
-            self.vocabulary = json.load(json_file)
-        self.vocabulary = {int(k): v for k, v in self.vocabulary.items()}
+            dict = json.load(json_file)
+        # 类型转换
+        self.vocabulary = {int(k): v for k, v in dict['vocabulary'].items()}
+        self.merge_items = {eval(k) : int(v) for k, v in dict['merge'].items()}
         print(self.vocabulary)
+        print(self.merge_items)
 
 
-    # TODO 编码
-    def encode(self, sentence: str):
-        pass
+    # 编码
+    def encode(self, sentence: str) -> list:
+
+        code_list = list(sentence.encode('utf-8'))
+
+        while len(code_list) > 1:
+            pairs = {}
+            self.__get_pairs(code_list, pairs)
+            # 找对应的索引值最小的 字符对 进行合并
+            pair = min(pairs , key=lambda x: self.merge_items.get(x, float('inf')))
+            if pair not in self.merge_items:
+                break
+            code_list = self.__merge(code_list, pair, self.merge_items[pair])
+
+        return code_list
+
+
 
 
     # 解码
@@ -92,10 +121,11 @@ class Tokenizer:
 
 tokenizer = Tokenizer()
 
-#tokenizer.build_vocabulary(data['english'].head(2).to_list())
-#tokenizer.save_vocabulary()
+tokenizer.build_vocabulary(130,['abbcd','bbb','bbc','d'])
+print(tokenizer.decode(tokenizer.encode('abbcd')))
+tokenizer.save_vocabulary()
 tokenizer.load_vocabulary()
-print(tokenizer.decode([148,145,136,112,65]))
+#print(tokenizer.decode([148,145,136,112,65]))
 
-
+#data['english'].head(2).to_list()
 
