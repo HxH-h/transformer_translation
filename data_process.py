@@ -1,6 +1,6 @@
 import json
 import pandas as pd
-
+import regex as re
 
 # 读取json文件
 path = './translation2019zh/translation_valid.json'
@@ -11,12 +11,12 @@ def read_json(path):
 
 data = read_json(path)
 
-# TODO 使用正则分词 避免无效合并分词
 # 创建分词器
 class Tokenizer:
     def __init__(self):
         self.merge_items = {}
         self.vocabulary = {i : chr(i) for i in range(128)}
+        self.regex = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
     # 获取相邻字符对 和 出现次数
     def __get_pairs(self, code_list: list , pairs: dict):
@@ -44,8 +44,9 @@ class Tokenizer:
 
     #BPE构建词汇表
     def build_vocabulary(self, vocab_size , sentences : list):
+
         # 获取句子初始的字符编码列表
-        raw_code = [list(sentence.encode('utf-8')) for sentence in sentences]
+        raw_code = [ list(s.encode('utf-8')) for sentence in sentences for s in re.findall(self.regex, sentence)]
 
         index = len(self.vocabulary)
         merge_num = vocab_size - index
@@ -68,7 +69,7 @@ class Tokenizer:
                 new_sentences.append(self.__merge(code_list, max_pair, index + i))
 
             raw_code = new_sentences
-        print(self.merge_items)
+
 
 
     # 保存词汇表
@@ -87,24 +88,29 @@ class Tokenizer:
         # 类型转换
         self.vocabulary = {int(k): v for k, v in dict['vocabulary'].items()}
         self.merge_items = {eval(k) : int(v) for k, v in dict['merge'].items()}
-        print(self.vocabulary)
-        print(self.merge_items)
 
 
-    # 编码
-    def encode(self, sentence: str) -> list:
-
-        code_list = list(sentence.encode('utf-8'))
+    # 对每个正则的分词进行编码
+    def __encode_phrase(self, phrase: str) -> list:
+        code_list = list(phrase.encode('utf-8'))
 
         while len(code_list) > 1:
             pairs = {}
             self.__get_pairs(code_list, pairs)
             # 找对应的索引值最小的 字符对 进行合并
-            pair = min(pairs , key=lambda x: self.merge_items.get(x, float('inf')))
+            pair = min(pairs, key=lambda x: self.merge_items.get(x, float('inf')))
             if pair not in self.merge_items:
                 break
             code_list = self.__merge(code_list, pair, self.merge_items[pair])
 
+        return code_list
+
+    # 编码
+    def encode(self, sentence: str) -> list:
+        phrase_list = re.findall(self.regex, sentence)
+        code_list = []
+        for phrase in phrase_list:
+            code_list.extend(self.__encode_phrase(phrase))
         return code_list
 
 
@@ -121,11 +127,12 @@ class Tokenizer:
 
 tokenizer = Tokenizer()
 
-tokenizer.build_vocabulary(130,['abbcd','bbb','bbc','d'])
-print(tokenizer.decode(tokenizer.encode('abbcd')))
+tokenizer.build_vocabulary(150, data['english'].head(10).to_list())
+code_list = tokenizer.encode('he is at 123 or ;,.')
+print(len('he is at 123 or ;,.'))
+print(len(code_list))
+print(tokenizer.decode(code_list))
 tokenizer.save_vocabulary()
 tokenizer.load_vocabulary()
-#print(tokenizer.decode([148,145,136,112,65]))
 
-#data['english'].head(2).to_list()
 
