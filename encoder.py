@@ -8,10 +8,10 @@ class Encoder(BaseModel):
     def forward(self, input: list):
         # 获取词向量
         input = torch.tensor(input)
-        embedding = self.embedding(input)
+        embedding_input = self.embedding(input)
 
         # 自注意力 返回 原始的 V 和根据注意力得到的 V
-        V , attention_v = self.attention(embedding)
+        V , attention_v = self.attention(embedding_input)
 
         # add & norm
         before_FFN = self.add_norm(V, attention_v)
@@ -25,9 +25,6 @@ class Encoder(BaseModel):
         return output
 
 
-
-encoder = Encoder(table_size=1000, embedding_size=100, d_K=64, d_V=64)
-encoder([1, 2, 3, 4, 5])
 
 
 
