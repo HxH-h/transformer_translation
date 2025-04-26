@@ -9,13 +9,14 @@ def read_json(path):
         data = json.load(f)
     return pd.DataFrame(data)
 
-data = read_json(path)
+
 
 # 创建分词器
 class Tokenizer:
     def __init__(self):
         self.merge_items = {}
         self.vocabulary = {i : chr(i) for i in range(128)}
+        self.special_tokens = {}
         self.regex = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
     # 获取相邻字符对 和 出现次数
@@ -41,6 +42,11 @@ class Tokenizer:
                 i += 1
         return new_code_list
 
+    # 添加特殊字符
+    def add_special_tokens(self , special_tokens: list):
+        start = len(self.vocabulary)
+        self.special_tokens = {s : i + start for i, s in enumerate(special_tokens)}
+
 
     #BPE构建词汇表
     def build_vocabulary(self, vocab_size , sentences : list):
@@ -63,6 +69,8 @@ class Tokenizer:
             # 记录合并项 更新词汇表
             self.merge_items[max_pair] = index + i
             self.vocabulary[index + i] = self.vocabulary[max_pair[0]] + self.vocabulary[max_pair[1]]
+
+            print(f"{max_pair} -> {index + i} : {self.vocabulary[index + i]}")
             # 合并
             new_sentences = []
             for code_list in raw_code:
@@ -105,14 +113,38 @@ class Tokenizer:
 
         return code_list
 
-    # 编码
-    def encode(self, sentence: str) -> list:
+    # 无特殊字符的编码
+    def encode_ordinary(self, sentence: str) -> list:
         phrase_list = re.findall(self.regex, sentence)
+
         code_list = []
         for phrase in phrase_list:
             code_list.extend(self.__encode_phrase(phrase))
         return code_list
 
+    # 允许句子中存在特殊字符
+    def encode(self , sentence: str) -> list:
+        code_list = []
+
+        # 无特殊字符表
+        if not self.special_tokens:
+            return self.encode_ordinary(sentence)
+
+
+        # 包含特殊字符表
+        # 拆分出句子中的特殊字符
+        special_pattern = f"({'|'.join(re.escape(s) for s in self.special_tokens.keys() )})"
+
+        sen_chunk = re.split(special_pattern , sentence)
+
+        for chunk in sen_chunk:
+            if chunk in self.special_tokens:
+                code_list.append(self.special_tokens[chunk])
+            else:
+                code_list.extend(self.encode_ordinary(chunk))
+
+
+        return code_list
 
 
 
@@ -125,14 +157,12 @@ class Tokenizer:
 
 
 
-tokenizer = Tokenizer()
-
-tokenizer.build_vocabulary(150, data['english'].head(10).to_list())
-code_list = tokenizer.encode('he is at 123 or ;,.')
-print(len('he is at 123 or ;,.'))
-print(len(code_list))
-print(tokenizer.decode(code_list))
-tokenizer.save_vocabulary()
-tokenizer.load_vocabulary()
-
+# data = read_json(path)
+# sentences = data['english'].to_list()
+#
+# tokenizer = Tokenizer()
+# tokenizer.build_vocabulary(10000, sentences)
+#
+# tokenizer.save_vocabulary()
+# tokenizer.load_vocabulary()
 
