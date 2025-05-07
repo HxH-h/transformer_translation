@@ -1,6 +1,6 @@
-
 import torch.nn as nn
 from Attention import Attention
+
 class BaseModel(nn.Module):
     def __init__(self , table_size , embedding_size , d_K , d_V):
         super(BaseModel, self).__init__()

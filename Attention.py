@@ -16,13 +16,18 @@ class Attention(nn.Module):
             input_KV = input_Q
 
         # 计算 Q K V
+        # (B , T , d_K)
         Q = input_Q @ self.WQ
-
         K = input_KV @ self.WK
+        # (B , T , d_V)
         V = input_KV @ self.WV
 
+
+
         # 计算注意力分数
-        attention_score = Q @ K.t()
+        #  (B , T , T)
+        attention_score = Q @ K.transpose(-1, -2)
+
 
         # 归一化
         attention_score /= torch.sqrt(torch.tensor(self.d_K))
@@ -30,11 +35,17 @@ class Attention(nn.Module):
         # 掩码
         if mask is not None:
             attention_score = attention_score.masked_fill(mask, -float('inf'))
-
+        print(attention_score)
         # 转为权重
         attention_score = torch.softmax(attention_score, dim= -1)
 
+        print(attention_score)
         # 获取融入注意力的 V 矩阵
+        # (B , T , T) @ (B , T , d_V) = (B , T , d_V)
         res = attention_score @ V
 
+
+
         return V , res
+
+
