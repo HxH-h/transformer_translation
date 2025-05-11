@@ -1,48 +1,37 @@
-from base_model import BaseModel
-import torch
+import torch.nn as nn
 from Attention import Attention
 
-class Decoder(BaseModel):
+class Decoder(nn.Module):
 
-    def __init__(self , table_size , embedding_size , d_K , d_V):
-        super(Decoder , self).__init__(table_size , embedding_size , d_K , d_V)
+    def __init__(self , d_model , d_K , d_V , num_heads):
+        super(Decoder , self).__init__()
+        self.attention = Attention(d_model , d_K , d_V , num_heads)
+        self.cross_attention = Attention(d_model , d_K , d_V , num_heads)
+        self.attention_norm = nn.LayerNorm(d_model)
+        self.cross_norm = nn.LayerNorm(d_model)
+        self.add_norm = nn.LayerNorm(d_model)
+        self.FFN = nn.Sequential(
+            nn.Linear(d_model , d_model * 4),
+            nn.ReLU(),
+            nn.Linear(d_model * 4 , d_model)
+        )
 
-        self.cross_attention = Attention(d_V , d_K , d_V)
 
-    def forward(self , de_input , en_input , en_mask ):
-        # 获取词向量
-        de_input = torch.tensor(de_input)
-
-        de_embedding_input = self.embedding(de_input)
-
-
-        # 掩码 注意力
-        attention_size = de_input.size(-1)
-        batch_size = de_input.size(0)
-
-        mask = torch.triu(torch.ones(batch_size , attention_size , attention_size, dtype=torch.bool) , diagonal = 1)
-
-        # 自注意力 返回 原始的 V 和根据注意力得到的 V
-        V, attention_v = self.attention(de_embedding_input , mask = mask)
-
-        # add & norm
-        de_before_cross = self.add_norm(V, attention_v)
-
+    def forward(self , d_input , attention_mask , e_input = None , cross_mask = None):
+        # 多头注意力
+        attention_out = self.attention(d_input , d_input , attention_mask)
+        attention_out = self.attention_norm(attention_out + d_input)
         # 交叉注意力
-        _ , after_cross =self.cross_attention(input_Q = de_before_cross ,
-                                                input_KV = en_input ,
-                                                mask = en_mask)
+        cross_attention = None
+        if e_input is not None:
+            cross_attention = self.cross_attention(attention_out , e_input , cross_mask)
+            cross_attention = self.cross_norm(cross_attention + attention_out)
+        # 前馈网络
+        x = attention_out if cross_attention is None else cross_attention
+        out = self.FFN(x)
+        out = self.add_norm(out + x)
 
-        before_FFN = self.add_norm(de_before_cross , after_cross)
-
-        # 全连接神经网络
-        after_FFN = self.FFN(before_FFN)
-
-
-        # add & norm
-        output = self.add_norm(before_FFN, after_FFN)
-
-        return output
+        return out
 
 
 
