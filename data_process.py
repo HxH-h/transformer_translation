@@ -1,168 +1,60 @@
-import json
+from tokenizer import Tokenizer
+import utils
 import pandas as pd
-import regex as re
+from torch.utils.data import DataLoader, Dataset
+from torch.nn.utils.rnn import pad_sequence
+import torch
+#%% 数据处理
+# 获取中英对照数据
+data = utils.get_data('./translation2019zh/t.json')
 
-# 读取json文件
-path = './translation2019zh/translation_valid.json'
-def read_json(path):
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    return pd.DataFrame(data)
+# 构建词汇表
+tokenizer = Tokenizer()
 
+en , zh = tokenizer.add_special_tokens(['<begin>','<end>','<pad>'])
 
+# 转token
+tokens = pd.DataFrame()
+tokens['en'] = data['en'].apply(lambda x: tokenizer.encode(x))
+tokens['zh'] = data['zh'].apply(lambda x: tokenizer.encode_chinese('<begin>' + x))
+print(len(data))
+#%%
+# english = tokenizer.decode(tokens.en[0])
+# res = tokenizer.decode_chinese(tokens.zh[0])
+# print(res)
+#%% 自定义 Dataset 和 DataLoader
+class Trans_dataset(Dataset):
+    def __init__(self , data , end):
+        self.data = data
+        self.end = end
+    def __getitem__(self , index):
+        return self.data['en'][index] , self.data['zh'][index] , self.data['zh'][index][1:] + [self.end]
+    def __len__(self):
+        return len(self.data)
 
-# 创建分词器
-class Tokenizer:
-    def __init__(self):
-        self.merge_items = {}
-        self.vocabulary = {i : chr(i) for i in range(128)}
-        self.special_tokens = {}
-        self.regex = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+def custom_collate(batch):
+    # batch 中的每个元素是一个样本
+    # 提取输入数据并进行填充
 
-    # 获取相邻字符对 和 出现次数
-    def __get_pairs(self, code_list: list , pairs: dict):
-        for pair in zip(code_list, code_list[1:]):
-            pairs[pair] = pairs.get(pair, 0) + 1
-
-
-    # 合并字符对
-    def __merge(self , code_list , pair , index) -> list:
-        code_len = len(code_list)
-        if code_len == 1:
-            return code_list
-
-        new_code_list = []
-        i = 0
-        while i < code_len:
-            if i < code_len - 1 and code_list[i] == pair[0] and code_list[i + 1] == pair[1]:
-                new_code_list.append(index)
-                i += 2
-            else:
-                new_code_list.append(code_list[i])
-                i += 1
-        return new_code_list
-
-    # 添加特殊字符
-    def add_special_tokens(self , special_tokens: list):
-        start = len(self.vocabulary)
-        self.special_tokens = {s : i + start for i, s in enumerate(special_tokens)}
+    # x , y , z = zip(*batch)
+    #
+    # x = pad_sequence([torch.tensor(i) for i in x], batch_first=True)
+    # y = pad_sequence([torch.tensor(i) for i in y], batch_first=True)
+    # z = pad_sequence([torch.tensor(i) for i in z], batch_first=True)
+    for data in zip(*batch):
+        # 返回填充后的 batch 数据
+        yield pad_sequence([torch.tensor(i) for i in data], batch_first=True , padding_value=zh['<pad>'])
 
 
-    #BPE构建词汇表
-    def build_vocabulary(self, vocab_size , sentences : list):
+dataset  = Trans_dataset(tokens , zh['<end>'])
+train_loader = DataLoader(dataset , batch_size=5 , shuffle=False , collate_fn=custom_collate)
 
-        # 获取句子初始的字符编码列表
-        raw_code = [ list(s.encode('utf-8')) for sentence in sentences for s in re.findall(self.regex, sentence)]
-
-        index = len(self.vocabulary)
-        merge_num = vocab_size - index
-
-        # BPE
-        for i in range(merge_num):
-            # 统计相邻字符对 出现的次数
-            pairs = {}
-            for code_list in raw_code:
-                self.__get_pairs(code_list, pairs)
-
-            # 取最大
-            max_pair = max(pairs, key=lambda x: pairs[x])
-            # 记录合并项 更新词汇表
-            self.merge_items[max_pair] = index + i
-            self.vocabulary[index + i] = self.vocabulary[max_pair[0]] + self.vocabulary[max_pair[1]]
-
-            print(f"{max_pair} -> {index + i} : {self.vocabulary[index + i]}")
-            # 合并
-            new_sentences = []
-            for code_list in raw_code:
-                new_sentences.append(self.__merge(code_list, max_pair, index + i))
-
-            raw_code = new_sentences
+for i , data in enumerate(train_loader):
+    x , y , z = data
+    print(data)
+    print(x)
+    print(y)
+    print(z)
 
 
-
-    # 保存词汇表
-    def save_vocabulary(self, path = 'data.json'):
-        dict = {"vocabulary": self.vocabulary,
-                "merge":  {str(k): v for k, v in self.merge_items.items()}}
-        # 将字典保存为JSON文件
-        with open(path, 'w', encoding='utf-8') as json_file:
-            json.dump(dict, json_file, ensure_ascii=False, indent=4)
-
-    # 加载词汇表
-    def load_vocabulary(self, path = 'data.json'):
-        # 从JSON文件加载字典
-        with open(path, 'r', encoding='utf-8') as json_file:
-            dict = json.load(json_file)
-        # 类型转换
-        self.vocabulary = {int(k): v for k, v in dict['vocabulary'].items()}
-        self.merge_items = {eval(k) : int(v) for k, v in dict['merge'].items()}
-
-
-    # 对每个正则的分词进行编码
-    def __encode_phrase(self, phrase: str) -> list:
-        code_list = list(phrase.encode('utf-8'))
-
-        while len(code_list) > 1:
-            pairs = {}
-            self.__get_pairs(code_list, pairs)
-            # 找对应的索引值最小的 字符对 进行合并
-            pair = min(pairs, key=lambda x: self.merge_items.get(x, float('inf')))
-            if pair not in self.merge_items:
-                break
-            code_list = self.__merge(code_list, pair, self.merge_items[pair])
-
-        return code_list
-
-    # 无特殊字符的编码
-    def encode_ordinary(self, sentence: str) -> list:
-        phrase_list = re.findall(self.regex, sentence)
-
-        code_list = []
-        for phrase in phrase_list:
-            code_list.extend(self.__encode_phrase(phrase))
-        return code_list
-
-    # 允许句子中存在特殊字符
-    def encode(self , sentence: str) -> list:
-        code_list = []
-
-        # 无特殊字符表
-        if not self.special_tokens:
-            return self.encode_ordinary(sentence)
-
-
-        # 包含特殊字符表
-        # 拆分出句子中的特殊字符
-        special_pattern = f"({'|'.join(re.escape(s) for s in self.special_tokens.keys() )})"
-
-        sen_chunk = re.split(special_pattern , sentence)
-
-        for chunk in sen_chunk:
-            if chunk in self.special_tokens:
-                code_list.append(self.special_tokens[chunk])
-            else:
-                code_list.extend(self.encode_ordinary(chunk))
-
-
-        return code_list
-
-
-
-    # 解码
-    def decode(self, tokens: list) -> str:
-        for i in range(len(tokens)):
-            tokens[i] = self.vocabulary[tokens[i]]
-        return ''.join(tokens)
-
-
-
-
-# data = read_json(path)
-# sentences = data['english'].to_list()
-#
-# tokenizer = Tokenizer()
-# tokenizer.build_vocabulary(10000, sentences)
-#
-# tokenizer.save_vocabulary()
-# tokenizer.load_vocabulary()
 
