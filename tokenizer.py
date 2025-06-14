@@ -1,5 +1,6 @@
 import regex as re
 import json
+import jieba
 # 分词器
 class Tokenizer:
     def __init__(self):
@@ -48,7 +49,7 @@ class Tokenizer:
 
 
     #BPE构建词汇表
-    def build_vocabulary(self, vocab_size , sentences : list):
+    def build_en_vocabulary(self, vocab_size , sentences : list):
 
         # 获取句子初始的字符编码列表
         raw_code = [ list(s.encode('utf-8')) for sentence in sentences for s in re.findall(self.regex, sentence)]
@@ -76,18 +77,29 @@ class Tokenizer:
                 new_sentences.append(self.__merge(code_list, max_pair, index + i))
 
             raw_code = new_sentences
+            if  i % 1000 == 0:
+                self.save_vocabulary()
 
     # 构建中文词汇表
     def build_zh_vocabulary(self, sentences : list):
         unique_chars = set()
 
         for strings in sentences:
-            for s in strings:
-                unique_chars.update(s)
+            tokens = jieba.lcut(strings)
+            unique_chars.update(tokens)
 
         self.zh_vocab = {char: idx for idx, char in enumerate(unique_chars)}
         self.id_to_char = {idx: char for char, idx in self.zh_vocab.items()}
 
+    def build_vocabulary(self, en_sentences : list , vocab_size , zh_sentences : list):
+        self.vocabulary = {i: chr(i) for i in range(128)}
+        self.merge_items = {}
+        self.zh_vocab = {}
+        self.id_to_char = {}
+
+        self.build_en_vocabulary(vocab_size , en_sentences)
+        self.build_zh_vocabulary(zh_sentences)
+        self.save_vocabulary()
 
 
     # 保存词汇表
@@ -179,18 +191,17 @@ class Tokenizer:
             if chunk in self.special_tokens_zh:
                 code_list.append(self.special_tokens_zh[chunk])
             else:
-                code_list.extend([self.zh_vocab[c] for c in chunk])
+                code_list.extend([self.zh_vocab[c] for c in jieba.lcut(chunk)])
 
         return code_list
 
     # 中文解码
-    def decode_chinese(self, tokens: list) -> str:
-        print(tokens)
+    def decode_chinese(self, tokens: list , flag = True):
         chi = [self.id_to_char[token] for token in tokens if token in self.id_to_char]
-        return ''.join(chi)
+        return ''.join(chi) if flag else chi
 
     # 解码
     def decode(self, tokens: list) -> str:
-        for i in range(len(tokens)):
-            tokens[i] = self.vocabulary[tokens[i]]
-        return ''.join(tokens)
+        res = [self.vocabulary[token] for token in tokens if token in self.vocabulary]
+
+        return ''.join(res)
