@@ -1,16 +1,21 @@
 import torch.nn as nn
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader
+
+
 import PARAMETER
 from Transformer.Transformer import Transformer
 import utils
 import pandas as pd
-from nltk.translate.bleu_score import sentence_bleu , SmoothingFunction
+
 from PARAMETER import *
+from data_process import Trans_dataset , custom_collate
+import gc
 
 # 检查设备
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+flag = torch.cuda.is_available()
+device = torch.device('cuda' if flag else 'cpu')
+
 print(device)
 
 # 设置随机数种子
@@ -30,34 +35,17 @@ tokens = pd.DataFrame()
 tokens['en'] = data['en'].apply(lambda x: en_t.Encode(x))
 tokens['zh'] = data['zh'].apply(lambda x: zh_t.Encode(x , add_bos=True , add_eos=True))
 
+tokens = tokens[
+    (tokens['en'].str.len() <= MAX_LEN) &
+    (tokens['zh'].str.len() <= MAX_LEN)
+].reset_index(drop=True)
+print(len(tokens))
 print("完成分词")
 
-# 创建 dataset 和 dataloader
 
-class Trans_dataset(Dataset):
-    def __init__(self , data):
-        self.data = data
-    def __getitem__(self , index):
-        return self.data['en'][index] , self.data['zh'][index][:-1] , self.data['zh'][index][1:]
-    def __len__(self):
-        return len(self.data)
-
-def custom_collate(batch):
-    # batch 中的每个元素是一个样本
-    # 提取输入数据并进行填充
-
-    x , y , z = zip(*batch)
-
-    # x = pad_sequence([torch.tensor(i) for i in x], batch_first=True , padding_value=pad_id)
-    # y = pad_sequence([torch.tensor(i) for i in y], batch_first=True , padding_value=pad_id)
-    # z = pad_sequence([torch.tensor(i) for i in z], batch_first=True , padding_value=pad_id)
-    for data in zip(*batch):
-        # 返回填充后的 batch 数据
-        yield pad_sequence([torch.tensor(i) for i in data], batch_first=True, padding_value=PAD_ID)
-    return x , y , z
 
 dataset  = Trans_dataset(tokens)
-train_loader = DataLoader(dataset, batch_size= BATCH_SIZE, shuffle=False, collate_fn=custom_collate)
+train_loader = DataLoader(dataset, batch_size= BATCH_SIZE, shuffle=True, collate_fn=custom_collate)
 
 
 
@@ -66,6 +54,9 @@ train_loader = DataLoader(dataset, batch_size= BATCH_SIZE, shuffle=False, collat
 model = Transformer(encoder_table_size = EN_VOCAB_SIZE, decoder_table_size=ZH_VOCAB_SIZE,
                     embedding_size=EMBEDDING_SIZE, d_K=D_K, d_V=D_V, num_heads=NUM_HEADS,
                     padding_idx = PAD_ID, device=device)
+if torch.cuda.device_count() > 1:
+    print(f"使用 {torch.cuda.device_count()} 块 GPU")
+    model = nn.DataParallel(model)
 model = model.to(device)
 
 loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_ID)
@@ -90,15 +81,20 @@ for epoch in range(EPOCH_NUM):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
+        torch.cuda.empty_cache()
         if i % 100 == 0:
             # 统计训练损失
             print(f'epoch: {epoch} , step: {i} , loss: {loss.item()}')
+
             loss_values.append(loss.item())
+
+    torch.cuda.empty_cache()
+    gc.collect()
 
 
 
 torch.save(model.state_dict() , PARAMETER.MODEL_PATH)
 utils.draw_curve(loss_values , path=PARAMETER.LOSS_PATH)
+
 
 

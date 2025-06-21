@@ -1,9 +1,9 @@
 import json
 import pandas as pd
-from opencc import OpenCC
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import torch
+from collections import OrderedDict
 import numpy as np
 import random
 import sentencepiece as spm
@@ -115,4 +115,22 @@ def load_tokenizer(en_path , zh_path):
     zh_tokenizer = spm.SentencePieceProcessor()
     zh_tokenizer.Load(zh_path)
     return en_tokenizer , zh_tokenizer
+
+
+# 多GPU训练，转换为单GPU/CPU
+def load_model_safely(model, path, map_location='cpu'):
+
+    state_dict = torch.load(path, map_location=map_location)
+
+    # 检查是否为 DataParallel 保存的模型（带 "module." 前缀）
+    if any(k.startswith("module.") for k in state_dict.keys()):
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            new_state_dict[k.replace("module.", "")] = v
+        state_dict = new_state_dict
+
+    # 加载 state_dict
+    model.load_state_dict(state_dict)
+    return model
+
 
